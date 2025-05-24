@@ -7,7 +7,8 @@ from typing import IO, Any, BinaryIO
 import numpy.typing as npt
 import torch
 from cs336_basics.train_bpe import train_bpe_tokenizer
-from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module, run_swiglu_module
+from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module, run_swiglu_module, \
+    run_rope_module
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -201,7 +202,7 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    return run_rope_module(d_k, theta, max_seq_len, in_query_or_key, token_positions)
 
 
 def run_transformer_block(

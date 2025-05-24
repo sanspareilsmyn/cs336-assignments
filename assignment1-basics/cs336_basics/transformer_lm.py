@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 from jaxtyping import Float, Int
 
@@ -154,3 +155,61 @@ def run_swiglu_module(
     ffn_layer.load_state_dict(state_dict_to_load)
 
     return ffn_layer(in_features)
+
+
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(self, d_k: int, theta: float, max_seq_len: int) -> None:
+        super().__init__()
+        if d_k % 2 != 0:
+            raise ValueError(f"d_k (dimension) must be even, but got {d_k}")
+
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        dim_indices = torch.arange(0, d_k, 2, dtype=torch.float32)
+        inv_freq = 1.0 / (theta ** (dim_indices / d_k))
+
+        t = torch.arange(max_seq_len, dtype=torch.float32)
+        freqs = torch.outer(t, inv_freq)
+
+        self.register_buffer('cos_cached', freqs.cos(), persistent=False)
+        self.register_buffer('sin_cached', freqs.sin(), persistent=False)
+
+    def forward(self, x: Float[Tensor, "... seq_len d_k"], token_positions: Int[Tensor, " ... seq_len"]) -> Float[
+        Tensor, " ... seq_len d_k"]:
+        token_positions_long = token_positions.long()
+        cos_selected = self.cos_cached[token_positions_long]  # (..., s, d_half)
+        sin_selected = self.sin_cached[token_positions_long]  # (..., s, d_half)
+
+        # x -> (..., s, d_half, 2)
+        x_pair = rearrange(x, '... s (d_half two) -> ... s d_half two', two=2)
+
+        # Rotate
+        x_even = x_pair[..., 0]
+        x_odd = x_pair[..., 1]
+
+        x_rotated_even = x_even * cos_selected - x_odd * sin_selected
+        x_rotated_odd = x_even * sin_selected + x_odd * cos_selected
+
+        result_pair = torch.empty_like(x_pair)
+        result_pair[..., 0] = x_rotated_even
+        result_pair[..., 1] = x_rotated_odd
+
+        return rearrange(result_pair, '... s d_half two -> ... s (d_half two)')
+
+
+def run_rope_module(
+        d_k: int,
+        theta: float,
+        max_seq_len: int,
+        in_query_or_key: Float[Tensor, " ... sequence_length d_k"],
+        token_positions: Int[Tensor, " ... sequence_length"],
+) -> Float[Tensor, " ... sequence_length d_k"]:
+    rope_layer = RotaryPositionalEmbedding(
+        d_k=d_k,
+        theta=theta,
+        max_seq_len=max_seq_len)
+    output_tensor = rope_layer(in_query_or_key, token_positions)
+
+    return output_tensor
