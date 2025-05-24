@@ -8,7 +8,8 @@ import numpy.typing as npt
 import torch
 from cs336_basics.train_bpe import train_bpe_tokenizer
 from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module, run_swiglu_module, \
-    run_rope_module, run_softmax_module, run_scaled_dot_product_attention_module
+    run_rope_module, run_softmax_module, run_scaled_dot_product_attention_module, run_multihead_self_attention_module, \
+    run_multihead_self_attention_with_rope_module
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -140,7 +141,9 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    return run_multihead_self_attention_module(d_model, num_heads, q_proj_weight, k_proj_weight, v_proj_weight,
+                                               o_proj_weight,
+                                               in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -180,7 +183,9 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    return run_multihead_self_attention_with_rope_module(d_model, num_heads, max_seq_len, theta, q_proj_weight,
+                                                         k_proj_weight, v_proj_weight, o_proj_weight, in_features,
+                                                         token_positions)
 
 
 def run_rope(

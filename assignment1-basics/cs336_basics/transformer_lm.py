@@ -264,3 +264,117 @@ def run_scaled_dot_product_attention_module(
     output = einsum(attention_weights, V, '... q_len k_len, ... k_len d_v -> ... q_len d_v')
 
     return output
+
+
+def run_multihead_self_attention_module(
+        d_model: int,
+        num_heads: int,
+        q_proj_weight: Tensor,  # (d_model, d_model)
+        k_proj_weight: Tensor,  # (d_model, d_model)
+        v_proj_weight: Tensor,  # (d_model, d_model)
+        o_proj_weight: Tensor,  # (d_model, d_model)
+        in_features: Tensor,  # (..., sequence_length, d_model)
+) -> Tensor:  # (..., sequence_length, d_model)
+    # Dimension per head
+    d_k_per_head = d_model // num_heads
+    d_v_per_head = d_model // num_heads
+
+    # Sequence length
+    seq_len = in_features.shape[-2]
+
+    # 1. Linear projections
+    q_raw = F.linear(in_features, q_proj_weight)
+    k_raw = F.linear(in_features, k_proj_weight)
+    v_raw = F.linear(in_features, v_proj_weight)
+
+    # 2. Reshape Q_raw, K_raw, V_raw for multi-head
+    # (..., seq_len, d_model) -> (..., num_heads, seq_len, d_k_per_head)
+    Q_multi_head = rearrange(q_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_k_per_head)
+    K_multi_head = rearrange(k_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_k_per_head)
+    V_multi_head = rearrange(v_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_v_per_head)
+
+    # 3. Create Causal Mask
+    causal_mask = torch.ones(seq_len, seq_len, device=in_features.device, dtype=torch.bool).tril(diagonal=0)
+
+    # 4. Apply Scaled Dot-Product Attention using the dedicated function
+    attn_output_per_head = run_scaled_dot_product_attention_module(
+        Q_multi_head, K_multi_head, V_multi_head, mask=causal_mask
+    )
+
+    # 5. Concatenate heads
+    attn_output_concatenated = rearrange(attn_output_per_head, '... h s d -> ... s (h d)')
+
+    # 6. Final linear projection
+    output = F.linear(attn_output_concatenated, o_proj_weight)
+
+    return output
+
+
+def run_multihead_self_attention_with_rope_module(
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        q_proj_weight: Float[Tensor, " d_k d_in"],
+        k_proj_weight: Float[Tensor, " d_k d_in"],
+        v_proj_weight: Float[Tensor, " d_v d_in"],
+        o_proj_weight: Float[Tensor, " d_model d_v"],
+        in_features: Float[Tensor, " ... sequence_length d_in"],
+        token_positions: Int[Tensor, " ... sequence_length"] | None = None,
+) -> Float[Tensor, " ... sequence_length d_out"]:
+    # Dimension per head
+    d_k_per_head = d_model // num_heads
+    d_v_per_head = d_model // num_heads
+
+    # Sequence length
+    leading_dims = in_features.shape[:-2]
+    seq_len = in_features.shape[-2]
+
+    # 1. Linear projections
+    q_raw = F.linear(in_features, q_proj_weight)  # (..., seq_len, d_model)
+    k_raw = F.linear(in_features, k_proj_weight)  # (..., seq_len, d_model)
+    v_raw = F.linear(in_features, v_proj_weight)  # (..., seq_len, d_model)
+
+    # 2. Reshape Q_raw, K_raw, V_raw for multi-head
+    Q_multi_head_no_rope = rearrange(q_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_k_per_head)
+    K_multi_head_no_rope = rearrange(k_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_k_per_head)
+    V_multi_head = rearrange(v_raw, '... s (h d) -> ... h s d', h=num_heads, d=d_v_per_head)
+
+    # 3. Apply RoPE to Q_multi_head and K_multi_head
+    if token_positions.ndim == len(leading_dims) + 1:  # (e.g., batch_size, seq_len)
+        token_pos_for_rope = token_positions.unsqueeze(-2)
+    elif token_positions.ndim == len(leading_dims) + 2 and token_positions.shape[-2] == num_heads:
+        token_pos_for_rope = token_positions
+    elif token_positions.ndim == len(leading_dims) + 2 and token_positions.shape[-2] == 1:
+        token_pos_for_rope = token_positions
+
+    Q_rope_applied = run_rope_module(
+        d_k=d_k_per_head,
+        theta=theta,
+        max_seq_len=max_seq_len,
+        in_query_or_key=Q_multi_head_no_rope,
+        token_positions=token_pos_for_rope
+    )
+    K_rope_applied = run_rope_module(
+        d_k=d_k_per_head,
+        theta=theta,
+        max_seq_len=max_seq_len,
+        in_query_or_key=K_multi_head_no_rope,
+        token_positions=token_pos_for_rope
+    )
+
+    # 4. Create Causal Mask
+    causal_mask = torch.ones(seq_len, seq_len, device=in_features.device, dtype=torch.bool).tril(diagonal=0)
+
+    # 5. Apply Scaled Dot-Product Attention
+    attn_output_per_head = run_scaled_dot_product_attention_module(
+        Q_rope_applied, K_rope_applied, V_multi_head, mask=causal_mask
+    )
+
+    # 6. Concatenate heads
+    attn_output_concatenated = rearrange(attn_output_per_head, '... h s d -> ... s (h d)')
+
+    # 7. Final linear projection
+    output = F.linear(attn_output_concatenated, o_proj_weight)
+
+    return output
