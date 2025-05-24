@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -213,3 +215,23 @@ def run_rope_module(
     output_tensor = rope_layer(in_query_or_key, token_positions)
 
     return output_tensor
+
+
+class SoftmaxModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: Tensor, dim: int) -> Tensor:
+        x_max = torch.max(x, dim=dim, keepdim=True).values
+        x_stabilized = x - x_max
+        exp_x = torch.exp(x_stabilized)
+        sum_exp_x = torch.sum(exp_x, dim=dim, keepdim=True)
+        return exp_x / sum_exp_x
+
+
+def run_softmax_module(
+        input_tensor: Tensor,
+        dim: int,
+) -> Tensor:
+    softmax_layer = SoftmaxModule()
+    return softmax_layer(input_tensor, dim=dim)
