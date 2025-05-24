@@ -7,7 +7,7 @@ from typing import IO, Any, BinaryIO
 import numpy.typing as npt
 import torch
 from cs336_basics.train_bpe import train_bpe_tokenizer
-from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module
+from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module, run_swiglu_module
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -84,7 +84,7 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    return run_swiglu_module(d_model, d_ff, w1_weight, w2_weight, w3_weight, in_features)
 
 
 def run_scaled_dot_product_attention(

@@ -95,3 +95,62 @@ def run_rmsnorm_module(
     rmsnorm_layer.load_state_dict(state_dict_to_load, strict=False)
 
     return rmsnorm_layer(in_features)
+
+
+class PositionwiseFeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff_override: int = None, device=None, dtype=None) -> None:
+        super().__init__()
+        self.d_model = d_model
+        factory_kwargs = {'device': device, 'dtype': dtype}
+
+        if d_ff_override is not None:
+            self.d_ff = d_ff_override
+        else:
+            hidden_dim_approx = int((8 / 3) * d_model)
+            self.d_ff = round(hidden_dim_approx / 64) * 64
+            if self.d_ff == 0:
+                self.d_ff = 64
+
+        self.w1 = nn.Linear(d_model, self.d_ff, bias=False, **factory_kwargs)  # W1x
+        self.w3 = nn.Linear(d_model, self.d_ff, bias=False, **factory_kwargs)  # W3x (for gating)
+        self.w2 = nn.Linear(self.d_ff, d_model, bias=False, **factory_kwargs)  # Output projection
+
+    def _silu(self, x: Tensor) -> Tensor:
+        return x * torch.sigmoid(x)
+
+    def forward(self, x: Float[Tensor, " ... d_model"]) -> Float[Tensor, " ... d_model"]:
+        # 1. W1x and W3x
+        hidden_states_w1 = self.w1(x)  # (..., d_ff)
+        hidden_states_w3 = self.w3(x)  # (..., d_ff)
+
+        # 2. SiLU(W1x)
+        activated_states = self._silu(hidden_states_w1)
+
+        # 3. SiLU(W1x) ⊙ W3x (Gated Linear Unit part)
+        gated_states = activated_states * hidden_states_w3
+
+        # 4. W2(gated_states)
+        output = self.w2(gated_states)  # (..., d_model)
+
+        return output
+
+
+def run_swiglu_module(
+        d_model: int,
+        d_ff: int,
+        w1_weight: Float[Tensor, " d_ff d_model"],
+        w2_weight: Float[Tensor, " d_model d_ff"],
+        w3_weight: Float[Tensor, " d_ff d_model"],
+        in_features: Float[Tensor, " ... d_model"],
+) -> Float[Tensor, " ... d_model"]:
+    factory_kwargs = {'device': w1_weight.device, 'dtype': w1_weight.dtype}
+    ffn_layer = PositionwiseFeedForward(d_model=d_model, d_ff_override=d_ff, **factory_kwargs)
+
+    state_dict_to_load = {
+        'w1.weight': w1_weight,
+        'w2.weight': w2_weight,
+        'w3.weight': w3_weight,
+    }
+    ffn_layer.load_state_dict(state_dict_to_load)
+
+    return ffn_layer(in_features)
