@@ -9,7 +9,7 @@ import torch
 from cs336_basics.train_bpe import train_bpe_tokenizer
 from cs336_basics.transformer_lm import run_linear_module, run_embedding_module, run_rmsnorm_module, run_swiglu_module, \
     run_rope_module, run_softmax_module, run_scaled_dot_product_attention_module, run_multihead_self_attention_module, \
-    run_multihead_self_attention_with_rope_module
+    run_multihead_self_attention_with_rope_module, run_transformer_block_module
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -280,7 +280,7 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    return run_transformer_block_module(d_model, num_heads, d_ff, max_seq_len, theta, weights, in_features)
 
 
 def run_transformer_lm(

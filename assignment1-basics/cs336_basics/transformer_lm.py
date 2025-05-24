@@ -378,3 +378,79 @@ def run_multihead_self_attention_with_rope_module(
     output = F.linear(attn_output_concatenated, o_proj_weight)
 
     return output
+
+
+def run_transformer_block_module(
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        max_seq_len: int,
+        theta: float,
+        weights: dict[str, Tensor],
+        in_features: Float[Tensor, "batch sequence_length d_model"],
+) -> Float[Tensor, "batch sequence_length d_model"]:
+    batch_size, seq_len, _ = in_features.shape
+
+    # 0. Create token positions
+    token_positions = torch.arange(seq_len, device=in_features.device).unsqueeze(0).expand(batch_size, -1)
+
+    # --- First sublayer: Multi-Head Self-Attention ---
+    # 1. RMSNorm (Pre-Normalization)
+    norm1_weights = weights['ln1.weight']
+    x_norm1 = run_rmsnorm_module(
+        d_model=d_model,
+        eps=1e-6,
+        weights=norm1_weights,
+        in_features=in_features
+    )
+
+    # 2. Causal Multi-Head Self-Attention with RoPE
+    q_proj_w = weights['attn.q_proj.weight']
+    k_proj_w = weights['attn.k_proj.weight']
+    v_proj_w = weights['attn.v_proj.weight']
+    o_proj_w = weights['attn.output_proj.weight']
+
+    attn_output = run_multihead_self_attention_with_rope_module(
+        d_model=d_model,
+        num_heads=num_heads,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        q_proj_weight=q_proj_w,
+        k_proj_weight=k_proj_w,
+        v_proj_weight=v_proj_w,
+        o_proj_weight=o_proj_w,
+        in_features=x_norm1,
+        token_positions=token_positions
+    )
+
+    # 3. Residual Connection
+    x_after_attn = in_features + attn_output
+
+    # --- Second sublayer: Feed-Forward Network ---
+    # 4. RMSNorm (Pre-Normalization)
+    norm2_weights = weights['ln2.weight']
+    x_norm2 = run_rmsnorm_module(
+        d_model=d_model,
+        eps=1e-6,
+        weights=norm2_weights,
+        in_features=x_after_attn
+    )
+
+    # 5. Position-wise Feed-Forward Network (SwiGLU)
+    ffn_w1_weight = weights['ffn.w1.weight']
+    ffn_w2_weight = weights['ffn.w2.weight']
+    ffn_w3_weight = weights['ffn.w3.weight']
+
+    ffn_output = run_swiglu_module(
+        d_model=d_model,
+        d_ff=d_ff,
+        w1_weight=ffn_w1_weight,
+        w2_weight=ffn_w2_weight,
+        w3_weight=ffn_w3_weight,
+        in_features=x_norm2
+    )
+
+    # 6. Residual Connection
+    output = x_after_attn + ffn_output
+
+    return output
