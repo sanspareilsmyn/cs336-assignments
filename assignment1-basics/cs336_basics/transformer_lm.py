@@ -2,11 +2,10 @@ import math
 
 import torch
 import torch.nn as nn
-from einops import rearrange
-
+import torch.nn.functional as F
+from einops import rearrange, einsum
 from jaxtyping import Float, Int
-
-from torch import Tensor, einsum
+from torch import Tensor
 from torch.nn import init
 
 
@@ -235,3 +234,33 @@ def run_softmax_module(
 ) -> Tensor:
     softmax_layer = SoftmaxModule()
     return softmax_layer(input_tensor, dim=dim)
+
+
+def run_scaled_dot_product_attention_module(
+        Q: Tensor,  # "... q d_k"
+        K: Tensor,  # "... k d_k"
+        V: Tensor,  # "... k d_v"
+        mask: Tensor | None = None,
+) -> Tensor:  # "... q d_v"
+    d_k = Q.shape[-1]
+
+    # 1. Inner product of Q and K
+    scores = einsum(Q, K, '... q_len d_k, ... k_len d_k -> ... q_len k_len')
+
+    # 2. Scaling by sqrt(d_k)
+    scores = scores / math.sqrt(d_k)
+
+    # 3. Masking
+    if mask is not None:
+        if mask.dtype == torch.bool:
+            condition_to_fill = (mask == False)
+        else:
+            condition_to_fill = (mask == 0.0)
+        scores = scores.masked_fill(condition_to_fill, float('-inf'))
+
+    attention_weights = F.softmax(scores, dim=-1)
+
+    # 5. Inner product of attention weights and V
+    output = einsum(attention_weights, V, '... q_len k_len, ... k_len d_v -> ... q_len d_v')
+
+    return output
