@@ -64,3 +64,47 @@ def run_embedding_module(vocab_size: int,
     state_dict_to_load = {'W': weights}
     embedding_layer.load_state_dict(state_dict_to_load, strict=False)
     return embedding_layer(token_ids)
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-6, device=None, dtype=None) -> None:
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        self.W = nn.Parameter(torch.empty((d_model,), **factory_kwargs))
+
+        init.trunc_normal_(self.W, mean=1.0, std=0.02)
+
+    def forward(self, x: Float[Tensor, " ... d_model"]) -> Float[Tensor, " ... d_model"]:
+        norm = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
+        return x * (self.W / norm)
+
+
+def run_rmsnorm_module(
+        d_model: int,
+        eps: float,
+        weights: Float[Tensor, " d_model"],
+        in_features: Float[Tensor, " ... d_model"],
+) -> Float[Tensor, " ... d_model"]:
+    """Given the weights of a RMSNorm affine transform,
+    return the output of running RMSNorm on the input features.
+
+    Args:
+        d_model (int): The dimensionality of the RMSNorm input.
+        eps: (float): A value added to the denominator for numerical stability.
+        weights (Float[Tensor, "d_model"]): RMSNorm weights.
+        in_features (Float[Tensor, "... d_model"]): Input features to run RMSNorm on. Can have arbitrary leading
+            dimensions.
+    Returns:
+        Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
+        RMSNorm of the `in_features`.
+    """
+    factory_kwargs = {'device': weights.device, 'dtype': weights.dtype}
+    rmsnorm_layer = RMSNorm(d_model=d_model, eps=eps, **factory_kwargs)
+
+    state_dict_to_load = {'W': weights}
+    rmsnorm_layer.load_state_dict(state_dict_to_load, strict=False)
+
+    return rmsnorm_layer(in_features)
