@@ -88,19 +88,6 @@ def run_rmsnorm_module(
         weights: Float[Tensor, " d_model"],
         in_features: Float[Tensor, " ... d_model"],
 ) -> Float[Tensor, " ... d_model"]:
-    """Given the weights of a RMSNorm affine transform,
-    return the output of running RMSNorm on the input features.
-
-    Args:
-        d_model (int): The dimensionality of the RMSNorm input.
-        eps: (float): A value added to the denominator for numerical stability.
-        weights (Float[Tensor, "d_model"]): RMSNorm weights.
-        in_features (Float[Tensor, "... d_model"]): Input features to run RMSNorm on. Can have arbitrary leading
-            dimensions.
-    Returns:
-        Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
-        RMSNorm of the `in_features`.
-    """
     factory_kwargs = {'device': weights.device, 'dtype': weights.dtype}
     rmsnorm_layer = RMSNorm(d_model=d_model, eps=eps, **factory_kwargs)
 
